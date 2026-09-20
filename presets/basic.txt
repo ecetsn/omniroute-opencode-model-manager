@@ -1,4 +1,4 @@
 # basic: a minimal, safe starting point
-kiro/auto
-kiro/claude-haiku-4.5
-kiro/claude-haiku-4.5-high
+kr/auto
+kr/claude-haiku-4.5
+kr/claude-haiku-4.5-high
