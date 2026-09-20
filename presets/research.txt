@@ -1,5 +1,5 @@
 # research: models geared toward long-context reasoning and research tasks
 antigravity/gemini-pro-agent
 antigravity/gemini-3.1-pro-high
-kiro/claude-sonnet-5
+kr/claude-sonnet-5
 openrouter/openrouter/free
