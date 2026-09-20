@@ -64,3 +64,29 @@ backup manually, copy it over your config yourself:
 ```
 cp ~/.config/opencode/opencode.jsonc.bak-<timestamp> ~/.config/opencode/opencode.jsonc
 ```
+
+
+## Kiro models use the wrong `kiro/` prefix
+
+Older versions of this repository used `kiro/` in examples and presets.
+OmniRoute expects the Kiro provider prefix to be `kr/`.
+
+Update the tool first:
+
+```bash
+git pull
+./install.sh
+```
+
+Then back up and migrate only the model ID prefix in your OpenCode config:
+
+```bash
+omni-models backup
+sed -i 's#kiro/#kr/#g' ~/.config/opencode/opencode.jsonc
+```
+
+Verify the result:
+
+```bash
+omni-models list
+```
