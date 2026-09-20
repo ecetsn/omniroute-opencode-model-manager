@@ -3,7 +3,7 @@
 // settings, other providers, and different model metadata.
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "omniroute/kiro/auto",
+  "model": "omniroute/kr/auto",
   "provider": {
     "omniroute": {
       "name": "OmniRoute",
@@ -13,8 +13,8 @@
         "apiKey": "{env:OMNIROUTE_API_KEY}"
       },
       "models": {
-        "kiro/auto": { "name": "kiro/auto" },
-        "kiro/claude-sonnet-5": { "name": "kiro/claude-sonnet-5" },
+        "kr/auto": { "name": "kr/auto" },
+        "kr/claude-sonnet-5": { "name": "kr/claude-sonnet-5" },
         "openrouter/openrouter/free": { "name": "openrouter/openrouter/free" }
       }
     }
