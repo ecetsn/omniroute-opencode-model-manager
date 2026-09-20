@@ -1,0 +1,10 @@
+# recommended: a well-rounded set covering coding, reasoning, and free experimentation
+kiro/auto
+kiro/claude-sonnet-5
+kiro/claude-sonnet-4.5
+antigravity/claude-sonnet-4-6
+antigravity/gemini-pro-agent
+antigravity/gemini-3.7-flash-tiered
+openrouter/openrouter/free
+openrouter/z-ai/glm-5.2:free
+openrouter/deepseek/deepseek-v4-flash-0731:free

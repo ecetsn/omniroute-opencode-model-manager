@@ -1,0 +1,22 @@
+// Example OpenCode config showing an OmniRoute provider curated with
+// omni-models. This is illustrative only - your real config may have more
+// settings, other providers, and different model metadata.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "omniroute/kiro/auto",
+  "provider": {
+    "omniroute": {
+      "name": "OmniRoute",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:20128/v1",
+        "apiKey": "{env:OMNIROUTE_API_KEY}"
+      },
+      "models": {
+        "kiro/auto": { "name": "kiro/auto" },
+        "kiro/claude-sonnet-5": { "name": "kiro/claude-sonnet-5" },
+        "openrouter/openrouter/free": { "name": "openrouter/openrouter/free" }
+      }
+    }
+  }
+}

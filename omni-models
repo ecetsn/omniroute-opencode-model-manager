@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+# omni-models: keep OpenCode's OmniRoute model list small and curated.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+CONFIG="${OMNI_MODELS_CONFIG:-$HOME/.config/opencode/opencode.jsonc}"
+
+_die() {
+  printf 'omni-models: error: %s\n' "$1" >&2
+  exit 1
+}
+
+_presets_dir() {
+  if [ -d "$SCRIPT_DIR/presets" ]; then
+    printf '%s\n' "$SCRIPT_DIR/presets"
+  elif [ -d "$HOME/.local/share/omniroute-opencode-model-manager/presets" ]; then
+    printf '%s\n' "$HOME/.local/share/omniroute-opencode-model-manager/presets"
+  else
+    _die "no presets directory found next to the script or in ~/.local/share/omniroute-opencode-model-manager"
+  fi
+}
+
+_backup() {
+  [ -f "$CONFIG" ] || return 0
+  local ts dest n
+  ts=$(date +%Y%m%d-%H%M%S)
+  dest="${CONFIG}.bak-${ts}"
+  # date has only 1-second resolution, so guard against two backups in the
+  # same second (e.g. scripted/rapid calls) colliding on one filename.
+  if [ -e "$dest" ]; then
+    n=2
+    while [ -e "$(printf '%s-%02d' "$dest" "$n")" ]; do
+      n=$((n + 1))
+    done
+    dest=$(printf '%s-%02d' "$dest" "$n")
+  fi
+  cp -- "$CONFIG" "$dest"
+  printf 'Backed up config to %s\n' "$dest" >&2
+}
+
+_ensure_config_exists() {
+  if [ -f "$CONFIG" ]; then
+    return 0
+  fi
+  mkdir -p -- "$(dirname -- "$CONFIG")"
+  cat > "$CONFIG" <<'EOF'
+{
+  "provider": {
+    "omniroute": {
+      "name": "OmniRoute",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:20128/v1",
+        "apiKey": "{env:OMNIROUTE_API_KEY}"
+      },
+      "models": {}
+    }
+  }
+}
+EOF
+  printf 'Created a new config at %s\n' "$CONFIG" >&2
+}
+
+# ---- JSONC block location -------------------------------------------------
+#
+# ponytail: these functions locate blocks by counting '{'/'}' characters
+# per line (net open/close count), not by tracking whether a brace sits
+# inside a string or a comment. This is simple and reads clearly, and it is
+# correct as long as the config is pretty-printed the way this tool (and
+# OpenCode itself) writes it: each object's braces dominate their own line,
+# and model IDs/names never contain literal '{' or '}' characters. If a
+# comment or string value in the omniroute block ever contains a stray
+# brace character, this will miscount. Upgrade path: a string/comment-aware
+# character scanner (rejected here as overkill for a small personal tool).
+
+_find_omni_range() {
+  # prints "<start_line> <end_line>" or nothing if not found
+  awk '
+    BEGIN { started = 0; depth = 0 }
+    {
+      line = $0
+      t = line; o = gsub(/\{/, "{", t)
+      t = line; c = gsub(/\}/, "}", t)
+      net = o - c
+      if (!started) {
+        if (line ~ /"omniroute"[[:space:]]*:[[:space:]]*\{/) {
+          started = 1
+          start = NR
+          depth = net
+          if (depth <= 0) { print start, NR; exit }
+        }
+        next
+      }
+      depth += net
+      if (depth <= 0) { print start, NR; exit }
+    }
+  ' "$CONFIG"
+}
+
+_find_models_range() {
+  # args: omni_start omni_end; prints "<start_line> <end_line>" or nothing
+  local s="$1" e="$2"
+  sed -n "${s},${e}p" "$CONFIG" | awk -v offset="$((s - 1))" '
+    BEGIN { started = 0; depth = 0 }
+    {
+      line = $0
+      t = line; o = gsub(/\{/, "{", t)
+      t = line; c = gsub(/\}/, "}", t)
+      net = o - c
+      if (!started) {
+        if (line ~ /"models"[[:space:]]*:[[:space:]]*\{/) {
+          started = 1
+          start = NR
+          depth = net
+          if (depth <= 0) { print start + offset, NR + offset; exit }
+        }
+        next
+      }
+      depth += net
+      if (depth <= 0) { print start + offset, NR + offset; exit }
+    }
+  '
+}
+
+_find_entries() {
+  # args: inner_start inner_end (models_start+1 .. models_end-1)
+  # prints one line per top-level entry: "<id>\t<start_line>\t<end_line>"
+  local s="$1" e="$2"
+  [ "$s" -gt "$e" ] && return 0
+  sed -n "${s},${e}p" "$CONFIG" | awk -v offset="$((s - 1))" '
+    BEGIN { in_entry = 0; depth = 0 }
+    {
+      line = $0
+      t = line; o = gsub(/\{/, "{", t)
+      t = line; c = gsub(/\}/, "}", t)
+      net = o - c
+      if (!in_entry) {
+        if (line ~ /"[^"]*"[[:space:]]*:[[:space:]]*\{/) {
+          match(line, /"[^"]*"/)
+          idq = substr(line, RSTART, RLENGTH)
+          cur_id = substr(idq, 2, length(idq) - 2)
+          entry_start = NR
+          depth = net
+          if (depth <= 0) {
+            print "ENTRY\t" cur_id "\t" (entry_start + offset) "\t" (NR + offset)
+          } else {
+            in_entry = 1
+          }
+        }
+        next
+      }
+      depth += net
+      if (depth <= 0) {
+        print "ENTRY\t" cur_id "\t" (entry_start + offset) "\t" (NR + offset)
+        in_entry = 0
+      }
+    }
+  '
+}
+
+_ensure_omniroute_block() {
+  local range
+  range=$(_find_omni_range)
+  [ -n "$range" ] && return 0
+
+  # No omniroute provider yet: insert one right after "provider": { if it
+  # exists, otherwise right after the top-level {.
+  local provider_line
+  provider_line=$(grep -n '"provider"[[:space:]]*:[[:space:]]*{' "$CONFIG" | head -n1 | cut -d: -f1 || true)
+
+  local insert_after block tmp
+  block='    "omniroute": {
+      "name": "OmniRoute",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:20128/v1",
+        "apiKey": "{env:OMNIROUTE_API_KEY}"
+      },
+      "models": {}
+    },'
+
+  tmp=$(mktemp)
+  if [ -n "$provider_line" ]; then
+    insert_after="$provider_line"
+    head -n "$insert_after" "$CONFIG" > "$tmp"
+    printf '%s\n' "$block" >> "$tmp"
+    tail -n "+$((insert_after + 1))" "$CONFIG" >> "$tmp"
+  else
+    insert_after=1
+    head -n "$insert_after" "$CONFIG" > "$tmp"
+    printf '  "provider": {\n%s\n  },\n' "$block" >> "$tmp"
+    tail -n "+$((insert_after + 1))" "$CONFIG" >> "$tmp"
+  fi
+  mv -- "$tmp" "$CONFIG"
+}
+
+_current_model_ids() {
+  _ensure_config_exists
+  _ensure_omniroute_block
+  local orange ostart oend mrange mstart mend
+  orange=$(_find_omni_range)
+  read -r ostart oend <<< "$orange"
+  mrange=$(_find_models_range "$ostart" "$oend")
+  [ -z "$mrange" ] && return 0
+  read -r mstart mend <<< "$mrange"
+  _find_entries "$((mstart + 1))" "$((mend - 1))" | awk -F'\t' '{ print $2 }'
+}
+
+_orig_block_for_id() {
+  # args: want_id; reads entry_ids/entry_starts/entry_ends arrays (globals)
+  local want="$1" i
+  for i in "${!entry_ids[@]}"; do
+    if [ "${entry_ids[$i]}" = "$want" ]; then
+      sed -n "${entry_starts[$i]},${entry_ends[$i]}p" "$CONFIG" | sed '$ s/,[[:space:]]*$//'
+      return 0
+    fi
+  done
+  return 1
+}
+
+_write_models() {
+  # args: model ids to keep, in order (already deduped by caller)
+  local ids=("$@")
+  _ensure_config_exists
+  _ensure_omniroute_block
+
+  local orange ostart oend mrange mstart mend
+  orange=$(_find_omni_range)
+  read -r ostart oend <<< "$orange"
+  mrange=$(_find_models_range "$ostart" "$oend")
+  read -r mstart mend <<< "$mrange"
+
+  entry_ids=()
+  entry_starts=()
+  entry_ends=()
+  local line
+  while IFS=$'\t' read -r tag id s e; do
+    [ "$tag" = "ENTRY" ] || continue
+    entry_ids+=("$id")
+    entry_starts+=("$s")
+    entry_ends+=("$e")
+  done < <(_find_entries "$((mstart + 1))" "$((mend - 1))")
+
+  _backup
+
+  # Split the boundary lines at the actual brace characters rather than
+  # assuming each brace has a whole line to itself - this also covers the
+  # same-line case ("models": {}, i.e. mstart == mend).
+  local start_line_text end_line_text prefix_partial suffix_partial remainder indent
+  start_line_text=$(sed -n "${mstart}p" "$CONFIG")
+  indent="${start_line_text%%[^ ]*}"
+  prefix_partial="${start_line_text%%\{*}{"
+  if [ "$mstart" -eq "$mend" ]; then
+    remainder="${start_line_text#*\{}"
+    suffix_partial="${indent}}${remainder#*\}}"
+  else
+    end_line_text=$(sed -n "${mend}p" "$CONFIG")
+    suffix_partial="${indent}}${end_line_text#*\}}"
+  fi
+
+  local tmp body_tmp
+  tmp=$(mktemp)
+  body_tmp=$(mktemp)
+
+  local id block first=1
+  for id in "${ids[@]}"; do
+    if block=$(_orig_block_for_id "$id"); then
+      :
+    else
+      block=$(printf '%s  "%s": { "name": "%s" }' "$indent" "$id" "$id")
+    fi
+    if [ "$first" -eq 1 ]; then
+      first=0
+    else
+      # add trailing comma to the previous entry
+      printf ',\n' >> "$body_tmp"
+    fi
+    printf '%s' "$block" >> "$body_tmp"
+  done
+  [ "${#ids[@]}" -gt 0 ] && printf '\n' >> "$body_tmp"
+
+  head -n "$((mstart - 1))" "$CONFIG" > "$tmp"
+  printf '%s\n' "$prefix_partial" >> "$tmp"
+  cat "$body_tmp" >> "$tmp"
+  printf '%s\n' "$suffix_partial" >> "$tmp"
+  tail -n "+$((mend + 1))" "$CONFIG" >> "$tmp"
+  rm -f -- "$body_tmp"
+
+  # Sanity check: braces still balance and the resulting model set matches
+  # what we intended. If not, discard the attempt and keep the backup.
+  local open_count close_count
+  open_count=$(tr -dc '{' < "$tmp" | wc -c)
+  close_count=$(tr -dc '}' < "$tmp" | wc -c)
+  if [ "$open_count" != "$close_count" ]; then
+    rm -f -- "$tmp"
+    _die "internal check failed (unbalanced braces after edit); config was not modified beyond the backup already taken"
+  fi
+
+  mv -- "$tmp" "$CONFIG"
+
+  local got want
+  got=$(_current_model_ids | sort)
+  want=$(printf '%s\n' "${ids[@]}" | sort)
+  if [ "$got" != "$want" ]; then
+    _die "internal check failed (model set mismatch after edit); a backup was taken before this write, use 'omni-models restore' to recover"
+  fi
+}
+
+_ids_dedup() {
+  # prints unique ids from stdin, preserving first-seen order
+  awk '!seen[$0]++'
+}
+
+# ---- commands ---------------------------------------------------------
+
+cmd_list() {
+  _current_model_ids
+}
+
+cmd_add() {
+  [ "$#" -ge 1 ] || _die "add requires at least one model id"
+  local combined
+  combined=$(
+    { _current_model_ids; printf '%s\n' "$@"; } | _ids_dedup
+  )
+  local ids=()
+  while IFS= read -r line; do
+    [ -n "$line" ] && ids+=("$line")
+  done <<< "$combined"
+  _write_models "${ids[@]}"
+  cmd_list
+}
+
+cmd_remove() {
+  [ "$#" -ge 1 ] || _die "remove requires at least one model id"
+  local to_remove=("$@")
+  local ids=() line keep id
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    keep=1
+    for id in "${to_remove[@]}"; do
+      [ "$line" = "$id" ] && keep=0 && break
+    done
+    [ "$keep" -eq 1 ] && ids+=("$line")
+  done < <(_current_model_ids)
+  _write_models "${ids[@]}"
+  cmd_list
+}
+
+cmd_keep() {
+  [ "$#" -ge 1 ] || _die "keep requires at least one model id"
+  local combined ids=() line
+  combined=$(printf '%s\n' "$@" | _ids_dedup)
+  while IFS= read -r line; do
+    [ -n "$line" ] && ids+=("$line")
+  done <<< "$combined"
+  _write_models "${ids[@]}"
+  cmd_list
+}
+
+cmd_preset() {
+  [ "$#" -eq 1 ] || _die "preset requires exactly one preset name"
+  local name="$1" pdir file
+  pdir=$(_presets_dir)
+  file="$pdir/$name.txt"
+  if [ ! -f "$file" ]; then
+    local available
+    available=$(cd -- "$pdir" && ls -- *.txt 2>/dev/null | sed 's/\.txt$//' | tr '\n' ' ')
+    _die "unknown preset '$name'. Available presets: $available"
+  fi
+  local ids=() line
+  while IFS= read -r line; do
+    line="${line%%#*}"
+    line="$(echo "$line" | tr -d '[:space:]' 2>/dev/null || true)"
+    [ -n "$line" ] && ids+=("$line")
+  done < "$file"
+  cmd_keep "${ids[@]}"
+}
+
+cmd_reset_basic() {
+  cmd_preset basic
+}
+
+cmd_backup() {
+  _ensure_config_exists
+  _backup
+}
+
+cmd_restore() {
+  [ -f "$CONFIG" ] || _die "no config exists at $CONFIG, nothing to restore"
+  local latest
+  latest=$(ls -1 -- "${CONFIG}".bak-* 2>/dev/null | sort | tail -n1 || true)
+  [ -n "$latest" ] || _die "no backups found matching ${CONFIG}.bak-*"
+  printf 'Restore %s -> %s ? [y/N] ' "$latest" "$CONFIG" >&2
+  local answer
+  read -r answer || answer="n"
+  case "$answer" in
+    y|Y|yes|YES) ;;
+    *) printf 'Cancelled.\n' >&2; exit 0 ;;
+  esac
+  _backup
+  cp -- "$latest" "$CONFIG"
+  printf 'Restored from %s\n' "$latest" >&2
+}
+
+cmd_help() {
+  cat <<'EOF'
+omni-models - keep OpenCode's OmniRoute model list small and curated
+
+Usage:
+  omni-models list                       Show currently enabled OmniRoute models
+  omni-models add <id> [id ...]          Add model id(s) to the current list
+  omni-models remove <id> [id ...]       Remove model id(s) from the current list
+  omni-models keep <id> [id ...]         Replace the list with exactly these ids
+  omni-models preset <name>              Replace the list with a named preset
+  omni-models reset-basic                Shortcut for: preset basic
+  omni-models backup                     Back up the config immediately
+  omni-models restore                    Restore the most recent backup
+  omni-models help                       Show this help
+
+Config file: ~/.config/opencode/opencode.jsonc
+(override with OMNI_MODELS_CONFIG=/path/to/opencode.jsonc)
+
+Examples:
+  omni-models list
+  omni-models add kiro/claude-sonnet-5
+  omni-models preset recommended
+  omni-models remove openrouter/openrouter/free
+  omni-models restore
+
+Model ids are real OpenRoute/OmniRoute-style ids (e.g. kiro/claude-sonnet-5),
+never aliases. A backup is taken before every write.
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"
+  [ "$#" -gt 0 ] && shift || true
+  case "$cmd" in
+    list) cmd_list "$@" ;;
+    add) cmd_add "$@" ;;
+    remove) cmd_remove "$@" ;;
+    keep) cmd_keep "$@" ;;
+    preset) cmd_preset "$@" ;;
+    reset-basic) cmd_reset_basic "$@" ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
+    help|-h|--help) cmd_help ;;
+    *)
+      printf 'Unknown command: %s\n\n' "$cmd" >&2
+      cmd_help >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

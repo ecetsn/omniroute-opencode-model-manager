@@ -1,0 +1,4 @@
+# basic: a minimal, safe starting point
+kiro/auto
+kiro/claude-haiku-4.5
+kiro/claude-haiku-4.5-high

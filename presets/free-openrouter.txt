@@ -1,0 +1,5 @@
+# free-openrouter: OpenRouter's free-tier models only (rate limits and availability vary)
+openrouter/openrouter/free
+openrouter/z-ai/glm-5.2:free
+openrouter/deepseek/deepseek-v4-flash-0731:free
+openrouter/cohere/north-mini-code:free
