@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # omni-models: keep OpenCode's OmniRoute model list small and curated.
 set -euo pipefail
+export LC_ALL=C
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
 CONFIG="${OMNI_MODELS_CONFIG:-$HOME/.config/opencode/opencode.jsonc}"
@@ -218,9 +219,21 @@ _orig_block_for_id() {
   return 1
 }
 
+_valid_id() {
+  case "$1" in
+    '') return 1 ;;
+    *[!A-Za-z0-9/_.:-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 _write_models() {
   # args: model ids to keep, in order (already deduped by caller)
   local ids=("$@")
+  local id
+  for id in "${ids[@]}"; do
+    _valid_id "$id" || _die "invalid model id '$id' (only letters, digits, and / _ . : - are allowed)"
+  done
   _ensure_config_exists
   _ensure_omniroute_block
 
