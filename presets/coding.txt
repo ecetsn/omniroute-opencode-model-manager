@@ -1,6 +1,6 @@
 # coding: models geared toward day-to-day coding tasks
-kiro/claude-sonnet-5
-kiro/claude-sonnet-4.5
+kr/claude-sonnet-5
+kr/claude-sonnet-4.5
 antigravity/claude-sonnet-4-6
 openrouter/cohere/north-mini-code:free
 openrouter/deepseek/deepseek-v4-flash-0731:free

@@ -49,14 +49,14 @@ its backups).
 ```
 omni-models preset basic
 # or curate manually:
-omni-models keep kiro/auto kiro/claude-sonnet-5
+omni-models keep kr/auto kr/claude-sonnet-5
 ```
 
 ## Usage
 
 ```
 omni-models list                       # show currently enabled models
-omni-models add kiro/claude-sonnet-5   # add a model
+omni-models add kr/claude-sonnet-5   # add a model
 omni-models preset recommended         # replace the list with a preset
 omni-models remove openrouter/openrouter/free
 omni-models restore                    # restore the most recent backup
@@ -64,7 +64,7 @@ omni-models help
 ```
 
 There are no aliases - you always pass real model IDs (e.g.
-`kiro/claude-sonnet-5`, `openrouter/z-ai/glm-5.2:free`), exactly as
+`kr/claude-sonnet-5`, `openrouter/z-ai/glm-5.2:free`), exactly as
 OmniRoute/OpenCode expect them.
 
 ### Presets

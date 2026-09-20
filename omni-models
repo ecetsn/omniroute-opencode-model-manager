@@ -436,12 +436,12 @@ Config file: ~/.config/opencode/opencode.jsonc
 
 Examples:
   omni-models list
-  omni-models add kiro/claude-sonnet-5
+  omni-models add kr/claude-sonnet-5
   omni-models preset recommended
   omni-models remove openrouter/openrouter/free
   omni-models restore
 
-Model ids are real OpenRoute/OmniRoute-style ids (e.g. kiro/claude-sonnet-5),
+Model ids are real OpenRoute/OmniRoute-style ids (e.g. kr/claude-sonnet-5),
 never aliases. A backup is taken before every write.
 EOF
 }
